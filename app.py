@@ -190,7 +190,8 @@ if tokens_list:
                 "📥 Download Filtered Data as CSV",
                 data=filtered_df.to_csv(index=False).encode('utf-8'),
                 file_name='filtered_rubric_data.csv',
-                mime='text/csv'
+                mime='text/csv',
+                key="filter_dowload"
             )
 
         # --- TAB 2: AVERAGE SCORES ---
@@ -200,7 +201,8 @@ if tokens_list:
                 "📥 Download Aggregated Data as CSV",
                 data=aggregated_df.to_csv(index=False).encode('utf-8'),
                 file_name='aggregated_rubric_data.csv',
-                mime='text/csv'
+                mime='text/csv',
+                key="agg_download"
             )
 
             group_by = st.selectbox("Group by", ['Institution', 'Rubric Item', 'Course', 'Instructor'])
@@ -277,10 +279,10 @@ if tokens_list:
                     st.download_button(
                         "📥 Download Aggregated Data as CSV",
                         data=long_agg_df.to_csv(index=False).encode('utf-8'),
-                        file_name='aggregated_rubric_data.csv',
-                        mime='text/csv'
+                        file_name='frequency_rubric_data.csv',
+                        mime='text/csv',
+                        key="freq_download"
                     )
-
                 except ValueError as e:
                     if "Horizontal spacing cannot be greater than" in str(e):
                         st.warning("⚠️ Too many items to display. Apply filters to reduce the number.")
