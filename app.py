@@ -12,6 +12,19 @@ st.set_page_config(page_title="Canvas Rubric Scraper", layout="wide")
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
+# --- PRE-LOGIN PDF DOWNLOAD ---
+st.sidebar.markdown("📄 **Instructions PDF**")
+with open("Canvas_Rubric_Instructions.pdf", "rb") as f:
+    pdf_bytes = f.read()
+
+st.sidebar.download_button(
+    label="Download Canvas Rubric Instructions",
+    data=pdf_bytes,
+    file_name="Canvas_Rubric_Instructions.pdf",
+    mime="application/pdf",
+    key="instructions_pdf"
+)
+
 # --- CREDENTIALS ---
 VALID_USERNAME = st.secrets["username"]
 VALID_PASSWORD = st.secrets["password"]
