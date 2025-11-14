@@ -13,9 +13,8 @@ if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
 # --- CREDENTIALS ---
-# --- CREDENTIALS ---
-VALID_USERNAME = "mark"
-VALID_PASSWORD = "password123"
+VALID_USERNAME = st.secrets["username"]
+VALID_PASSWORD = st.secrets["password"]
 
 
 # --- LOGIN SIDEBAR ---
