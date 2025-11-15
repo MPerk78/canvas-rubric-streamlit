@@ -11,7 +11,7 @@ from openai import OpenAI
 st.set_page_config(page_title="Canvas Tools", layout="wide")
 
 # --- HEADER ---
-st.image("COED.png", width=300)
+st.image("COED.PNG", width=300)
 st.title("Canvas Rubric Scraper & Comments Exporter")
 st.markdown(
     "<h5 style='color: gray;'>This Program is the Property of Mark A. Perkins, Ph.D.</h5>",
@@ -276,7 +276,7 @@ with tab_rubric:
 # =========================
 with tab_comments:
     st.subheader("Comments Exporter")
-    st.image("COED.png", width=300)
+    st.image("COED.PNG", width=300)
     st.markdown("### Download comments from your courses and export to a CSV")
 
     if tokens_list:
