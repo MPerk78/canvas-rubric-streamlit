@@ -1,36 +1,30 @@
 import streamlit as st
-from canvasapi import Canvas
 import pandas as pd
+import requests
+import re           # <-- add this line
+from canvasapi import Canvas
 from datetime import datetime
 import plotly.express as px
-import re
+from openai import OpenAI
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Canvas Rubric Scraper", layout="wide")
+st.set_page_config(page_title="Canvas Tools", layout="wide")
 
-# --- SESSION STATE FOR LOGIN ---
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-
-# --- PRE-LOGIN PDF DOWNLOAD ---
-st.sidebar.markdown("📄 **Instructions PDF**")
-with open("Canvas_Rubric_Instructions.pdf", "rb") as f:
-    pdf_bytes = f.read()
-
-st.sidebar.download_button(
-    label="Download Canvas Rubric Instructions",
-    data=pdf_bytes,
-    file_name="Canvas_Rubric_Instructions.pdf",
-    mime="application/pdf",
-    key="instructions_pdf"
+# --- HEADER ---
+st.image("COED.png", width=300)
+st.title("Canvas Rubric Scraper & Comments Exporter")
+st.markdown(
+    "<h5 style='color: gray;'>This Program is the Property of Mark A. Perkins, Ph.D.</h5>",
+    unsafe_allow_html=True
 )
 
-# --- CREDENTIALS ---
+# --- LOGIN ---
 VALID_USERNAME = st.secrets["username"]
 VALID_PASSWORD = st.secrets["password"]
 
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
 
-# --- LOGIN SIDEBAR ---
 st.sidebar.title("🔒 Login")
 username_input = st.sidebar.text_input("Username")
 password_input = st.sidebar.text_input("Password", type="password")
@@ -46,21 +40,10 @@ if not st.session_state["logged_in"]:
     st.warning("Please log in to access the app.")
     st.stop()
 
-# --- HEADER ---
-st.image(
-    "https://marksresearch.shinyapps.io/PictureSite/_w_237fc4faadbc4c7e844fdb756bcd9876/COED2.png",
-    width=240
-)
-st.title("Canvas Rubric Report Generator")
-st.markdown(
-    "<h5 style='color: gray;'>This Program is the Property of Mark A. Perkins, Ph.D. for demonstration at UCCS</h5>",
-    unsafe_allow_html=True
-)
-
-# --- CSV UPLOAD ---
-token_file = st.file_uploader("Upload a CSV API Token and Canvas Web Address", type=["csv"])
-
+# --- UPLOAD TOKENS CSV ---
+token_file = st.file_uploader("Upload CSV with Token, URL, Institution", type=["csv"])
 tokens_list = []
+
 if token_file:
     try:
         tokens_df = pd.read_csv(token_file).dropna(subset=['Token', 'URL']).drop_duplicates(subset=['Token', 'URL'])
@@ -68,105 +51,102 @@ if token_file:
         st.success(f"{len(tokens_list)} token(s) loaded.")
     except Exception as e:
         st.error(f"Could not read tokens: {e}")
-        tokens_list = []
 
-# --- FETCH DATA FUNCTION ---
-@st.cache_data(show_spinner=False)
-def fetch_data(tokens_with_urls):
-    all_data = []
+# --- TABS ---
+tab_rubric, tab_comments = st.tabs(["📋 Rubric Scraper", "💬 Comments Exporter"])
 
-    # Term helpers
-    def extract_term_info(start_date_str):
-        try:
-            start_date = datetime.fromisoformat(start_date_str.rstrip("Z"))
-            month = start_date.month
-            year = start_date.year
+# =========================
+# TAB 1: RUBRIC SCRAPER
+# =========================
+with tab_rubric:
+    st.subheader("Rubric Analyzer")
 
-            if 1 <= month <= 4:
-                term = "Spring"
-            elif 5 <= month <= 7:
-                term = "Summer"
-            else:
-                term = "Fall"
+    if tokens_list:
 
-            academic_year = f"{year}-{year+1}" if term == "Fall" else f"{year-1}-{year}"
-            return term, academic_year
-        except Exception:
-            return "Unknown", "Unknown"
+        @st.cache_data(show_spinner=False)
+        def fetch_rubric_data(tokens_with_urls):
+            all_data = []
 
-    def extract_term_and_year_from_name(course_name):
-        match = re.search(r'\((Spring|Summer|Fall) (\d{4})\)', course_name)
-        if match:
-            term = match.group(1)
-            year = int(match.group(2))
-            academic_year = f"{year}-{year+1}" if term == "Fall" else f"{year-1}-{year}"
-            return term, academic_year
-        return "Unknown", "Unknown"
-
-    # Fetch data from Canvas
-    for record in tokens_with_urls:
-        token = record['Token']
-        canvas_url = record['URL']
-        institution = record.get('Institution', 'Unknown')
-        try:
-            canvas = Canvas(canvas_url, token)
-            courses = list(canvas.get_courses(enrollment_type='teacher', state=['available', 'completed']))
-            st.write(f"🧾 Token {token[:6]}... found {len(courses)} courses")
-
-            for course in courses:
+            def term_year(course):
                 try:
-                    instructor = course.get_users(enrollment_type='teacher')
-                    instructor_names = ", ".join([i.short_name for i in instructor])
-                    term, year = extract_term_info(course.start_at) if course.start_at else extract_term_and_year_from_name(course.name)
-                    course_name = course.name
-                    course_start_date = course.start_at if course.start_at else "Unknown"
+                    if course.start_at:
+                        start_date = datetime.fromisoformat(course.start_at.rstrip("Z"))
+                        month = start_date.month
+                        year = start_date.year
+                        term = "Spring" if 1 <= month <= 4 else "Summer" if 5 <= month <= 7 else "Fall"
+                        academic_year = f"{year}-{year+1}" if term=="Fall" else f"{year-1}-{year}"
+                        return term, academic_year
+                    else:
+                        return "Unknown", "Unknown"
+                except:
+                    return "Unknown", "Unknown"
 
-                    assignments = course.get_assignments(include=['rubric'])
-                    for assignment in assignments:
-                        if not hasattr(assignment, 'rubric') or not assignment.rubric:
-                            continue
-                        rubric = assignment.rubric
-                        submissions = assignment.get_submissions(include=['rubric_assessment'])
+            for record in tokens_with_urls:
+                token = record['Token']
+                canvas_url = record['URL']
+                institution = record.get('Institution', 'Unknown')
+                try:
+                    canvas = Canvas(canvas_url, token)
+                    courses = list(canvas.get_courses(enrollment_type='teacher', state=['available', 'completed']))
+                    for course in courses:
+                        instructor_list = course.get_users(enrollment_type='teacher')
+                        instructors = ", ".join([i.short_name for i in instructor_list])
+                        term, year = term_year(course)
+                        assignments = course.get_assignments(include=['rubric'])
+                        for assignment in assignments:
+                            if not getattr(assignment, 'rubric', None):
+                                continue
+                            submissions = assignment.get_submissions(include=['rubric_assessment'])
+                            for sub in submissions:
+                                if getattr(sub, 'rubric_assessment', None):
+                                    for setting in assignment.rubric:
+                                        rid = setting['id']
+                                        desc = setting['description']
+                                        score = sub.rubric_assessment.get(rid, {}).get('points', None)
+                                        all_data.append({
+                                            "Institution": institution,
+                                            "Term": term,
+                                            "Year": year,
+                                            "Course": course.name,
+                                            "Instructor": instructors,
+                                            "Assignment": assignment.name,
+                                            "Rubric Item": desc,
+                                            "Score": score,
+                                            "Points Possible": setting.get('points', None),
+                                            "Student ID": sub.user_id
+                                        })
+                except Exception as e:
+                    st.warning(f"Error fetching data for token {token[:6]}: {e}")
+            return pd.DataFrame(all_data)
 
-                        for submission in submissions:
-                            if hasattr(submission, 'rubric_assessment') and submission.rubric_assessment:
-                                for setting in rubric:
-                                    rid = setting['id']
-                                    desc = setting['description']
-                                    score = submission.rubric_assessment.get(rid, {}).get('points', None)
-                                    points_possible = setting.get('points', None)
-                                    all_data.append({
-                                        "Institution": institution,
-                                        "Term": term,
-                                        "Year": year,
-                                        "Course": course_name,
-                                        "Instructor": instructor_names,
-                                        "Assignment": assignment.name,
-                                        "Rubric Item": desc,
-                                        "Score": score,
-                                        "Points Possible": points_possible,
-                                        "Student ID": submission.user_id,
-                                        "Course Start Date": course_start_date
-                                    })
-                except Exception as course_error:
-                    st.warning(f"⚠️ Error in course {course_name}: {course_error}")
-        except Exception as token_error:
-            st.error(f"🚫 Error using token {token[:6]}...: {token_error}")
+        # --- FETCH BUTTON ---
+        if st.button("Fetch Rubric Data"):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            df_rubric_all = pd.DataFrame()
+            total_tokens = len(tokens_list)
 
-    return pd.DataFrame(all_data)
+            for i, record in enumerate(tokens_list):
+                status_text.text(f"Processing token {i+1}/{total_tokens} ({record.get('Institution', 'Unknown')})...")
+                df_part = fetch_rubric_data([record])
+                df_rubric_all = pd.concat([df_rubric_all, df_part], ignore_index=True)
+                progress_bar.progress(int((i+1)/total_tokens*100))
 
-# --- FETCH DATA ---
-if tokens_list:
-    with st.spinner("⏳ Fetching rubric data..."):
-        df = fetch_data(tokens_list)
+            progress_bar.empty()
+            status_text.empty()
 
-    if df.empty:
-        st.info("No rubric data found for the uploaded tokens.")
-    else:
-        st.success(f"✅ Found {len(df)} rubric scores across {df['Course'].nunique()} course(s).")
+            if df_rubric_all.empty:
+                st.info("No rubric data found.")
+            else:
+                st.session_state['df_rubric'] = df_rubric_all
+                st.success("✅ Rubric data fetched successfully!")
 
-        # --- FILTERS ---
-        filtered_df = df.copy()
+    # --- FILTERS AND VISUALIZATION ---
+    if 'df_rubric' in st.session_state:
+        df_rubric = st.session_state['df_rubric'].copy()
+
+        # Filters
+        filtered_df = df_rubric.copy()
         for col, label in [('Institution', "Select Institution(s)"),
                            ('Year', "Select Academic Year(s)"),
                            ('Term', "Select Term(s)"),
@@ -188,40 +168,35 @@ if tokens_list:
             ).reset_index()
         )
 
-        # --- TABS ---
-        tab1, tab2, tab3 = st.tabs([
+        # --- TABS FOR VISUALS ---
+        tab1_r, tab2_r, tab3_r = st.tabs([
             "📋 Data Table", 
             "📊 Average Scores", 
             "🧮 Score Frequency"
         ])
 
-        # --- TAB 1: RAW DATA ---
-        with tab1:
+        with tab1_r:
             st.dataframe(filtered_df, use_container_width=True)
             st.download_button(
                 "📥 Download Filtered Data as CSV",
                 data=filtered_df.to_csv(index=False).encode('utf-8'),
                 file_name='filtered_rubric_data.csv',
-                mime='text/csv',
-                key="filter_dowload"
+                mime='text/csv'
             )
 
-        # --- TAB 2: AVERAGE SCORES ---
-        with tab2:
+        with tab2_r:
             st.subheader("🎯 Average Scores Visualization")
             st.download_button(
                 "📥 Download Aggregated Data as CSV",
                 data=aggregated_df.to_csv(index=False).encode('utf-8'),
                 file_name='aggregated_rubric_data.csv',
-                mime='text/csv',
-                key="agg_download"
+                mime='text/csv'
             )
 
             group_by = st.selectbox("Group by", ['Institution', 'Rubric Item', 'Course', 'Instructor'])
             if not aggregated_df.empty:
                 avg_scores = aggregated_df.groupby(group_by)['Avg_Score'].mean().sort_values().reset_index()
 
-                # Bar chart
                 fig1 = px.bar(
                     avg_scores, x=group_by, y='Avg_Score',
                     title=f"Average Scores by {group_by}",
@@ -232,19 +207,17 @@ if tokens_list:
                 fig1.update_layout(xaxis_tickangle=45, margin=dict(l=40, r=40, t=80, b=100), height=450)
                 st.plotly_chart(fig1, use_container_width=True)
 
-                # Box plot
                 fig2 = px.box(aggregated_df, x='Avg_Score', y=group_by, points="all", title=f"Score Distribution by {group_by}")
                 fig2.update_layout(margin=dict(l=40, r=40, t=50, b=100), height=450)
                 st.plotly_chart(fig2, use_container_width=True)
 
-        # --- TAB 3: SCORE FREQUENCY ---
-        with tab3:
+        with tab3_r:
             long_agg_df = (
                 filtered_df.groupby(['Rubric Item', 'Score'])
                 .agg(Count=('Student ID', 'nunique'))
                 .reset_index()
             )
-            total_per_criterion = long_agg_df.groupby('Rubric Item')['Count'].transform('sum')
+            total_per_criterion = long_agg_df.groupby("Rubric Item")["Count"].transform("sum")
             long_agg_df['Percentage'] = (long_agg_df['Count'] / total_per_criterion * 100).round(1)
             long_agg_df['Label'] = long_agg_df.apply(lambda row: f"{row['Count']} ({row['Percentage']}%)", axis=1)
 
@@ -257,7 +230,6 @@ if tokens_list:
                 st.warning(f"⚠️ {num_rubric_items} rubric items selected — too many to display. Filter further to <12.")
             else:
                 facet_by = st.selectbox("Facet by", ["Rubric Item", "Institution"])
-
                 try:
                     if facet_by == "Rubric Item":
                         ranges = long_agg_df.groupby("Rubric Item")["Score"].agg(['min', 'max']).reset_index()
@@ -292,13 +264,106 @@ if tokens_list:
                         "📥 Download Aggregated Data as CSV",
                         data=long_agg_df.to_csv(index=False).encode('utf-8'),
                         file_name='frequency_rubric_data.csv',
-                        mime='text/csv',
-                        key="freq_download"
+                        mime='text/csv'
                     )
                 except ValueError as e:
-                    if "Horizontal spacing cannot be greater than" in str(e):
-                        st.warning("⚠️ Too many items to display. Apply filters to reduce the number.")
-                    else:
-                        st.error(f"Unexpected error: {e}")
+                    st.warning(f"⚠️ {e}")
                 except Exception as e:
                     st.error(f"🚨 Error rendering score frequency chart: {e}")
+
+# =========================
+# TAB 2: COMMENTS EXPORTER
+# =========================
+with tab_comments:
+    st.subheader("Comments Exporter")
+    st.image("COED.png", width=300)
+    st.markdown("### Download comments from your courses and export to a CSV")
+
+    if tokens_list:
+        institution = st.selectbox("Select Institution", [r.get('Institution','Unknown') for r in tokens_list])
+        inst_row = next(r for r in tokens_list if r.get('Institution')==institution)
+        base_url = inst_row['URL'].rstrip("/") + "/api/v1"
+        token = inst_row['Token']
+
+        # Helper functions
+        def paginate_request(url, token):
+            headers = {"Authorization": f"Bearer {token}"}
+            all_results = []
+            while url:
+                r = requests.get(url, headers=headers)
+                r.raise_for_status()
+                all_results.extend(r.json())
+                url = r.links["next"]["url"] if "next" in r.links else None
+            return all_results
+
+        def get_courses(base_url, token):
+            url = f"{base_url}/courses?per_page=100"
+            return paginate_request(url, token)
+
+        def get_assignments(base_url, token, course_id):
+            url = f"{base_url}/courses/{course_id}/assignments?per_page=100"
+            return paginate_request(url, token)
+
+        def get_student_names(base_url, token, course_id):
+            url = f"{base_url}/courses/{course_id}/enrollments?type[]=StudentEnrollment&per_page=100"
+            enrollments = paginate_request(url, token)
+            return [e["user"]["name"] for e in enrollments]
+
+        def get_instructor_ids(base_url, token, course_id):
+            url = f"{base_url}/courses/{course_id}/enrollments?type[]=TeacherEnrollment&per_page=100"
+            enrollments = paginate_request(url, token)
+            return [e["user"]["id"] for e in enrollments]
+
+        def get_comments(base_url, token, course_id, assignment_id):
+            url = f"{base_url}/courses/{course_id}/assignments/{assignment_id}/submissions?include[]=submission_comments&per_page=100"
+            return paginate_request(url, token)
+
+        def clean_comment(text, student_names):
+            cleaned = text
+            for name in student_names:
+                cleaned = re.sub(re.escape(name), "STUDENT", cleaned, flags=re.IGNORECASE)
+                for part in name.split():
+                    cleaned = re.sub(rf"\b{re.escape(part)}\b", "STUDENT", cleaned, flags=re.IGNORECASE)
+            return cleaned
+
+        # Course + Assignment selection
+        courses = get_courses(base_url, token)
+        course_dict = {c["name"]: c["id"] for c in courses if c.get("name") and c.get("id")}
+        course_name = st.selectbox("Select Course", list(course_dict.keys()))
+        course_id = course_dict[course_name]
+
+        assignments = get_assignments(base_url, token, course_id)
+        assignment_dict = {a["name"]: a["id"] for a in assignments if a.get("name") and a.get("id")}
+        assignment_name = st.selectbox("Select Assignment", list(assignment_dict.keys()))
+        assignment_id = assignment_dict[assignment_name]
+
+        if st.button("Pull Comments"):
+            student_names = get_student_names(base_url, token, course_id)
+            instructor_ids = get_instructor_ids(base_url, token, course_id)
+            submissions = get_comments(base_url, token, course_id, assignment_id)
+
+            rows = []
+            for sub in submissions:
+                for c in sub.get("submission_comments", []):
+                    raw = c["comment"]
+                    cleaned = clean_comment(raw, student_names)
+                    author_id = c.get("author_id")
+                    role = "Instructor" if author_id in instructor_ids else "Student"
+                    rows.append({
+                        "student_id": sub.get("user_id"),
+                        "author_id": author_id,
+                        "role": role,
+                        "raw_comment": raw,
+                        "cleaned_comment": cleaned
+                    })
+
+            df_comments = pd.DataFrame(rows)
+            st.dataframe(df_comments)
+
+            st.download_button(
+                "Download Comments CSV",
+                df_comments.to_csv(index=False),
+                file_name=f"{course_name}_{assignment_name}_comments.csv",
+                mime="text/csv"
+            )
+
