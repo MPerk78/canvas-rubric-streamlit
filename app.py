@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 import requests
-import re           # <-- add this line
+import re
+import io
+import csv
 from canvasapi import Canvas
 from datetime import datetime
 import plotly.express as px
@@ -10,8 +12,21 @@ from openai import OpenAI
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Canvas Tools", layout="wide")
 
+# --- PRE-LOGIN PDF DOWNLOAD ---
+st.sidebar.markdown("📄 **Instructions PDF**")
+with open("Canvas_Rubric_Instructions.pdf", "rb") as f:
+    pdf_bytes = f.read()
+
+st.sidebar.download_button(
+    label="Download Canvas Rubric Instructions",
+    data=pdf_bytes,
+    file_name="Canvas_Rubric_Instructions.pdf",
+    mime="application/pdf",
+    key="instructions_pdf"
+)
+
 # --- HEADER ---
-st.image("COED.PNG", width=300)
+st.image("COED.png", width=300)
 st.title("Canvas Rubric Scraper & Comments Exporter")
 st.markdown(
     "<h5 style='color: gray;'>This Program is the Property of Mark A. Perkins, Ph.D.</h5>",
@@ -276,7 +291,7 @@ with tab_rubric:
 # =========================
 with tab_comments:
     st.subheader("Comments Exporter")
-    st.image("COED.PNG", width=300)
+    st.image("COED.png", width=300)
     st.markdown("### Download comments from your courses and export to a CSV")
 
     if tokens_list:
@@ -317,11 +332,13 @@ with tab_comments:
         def get_comments(base_url, token, course_id, assignment_id):
             url = f"{base_url}/courses/{course_id}/assignments/{assignment_id}/submissions?include[]=submission_comments&per_page=100"
             return paginate_request(url, token)
-
+            
         def clean_comment(text, student_names):
             cleaned = text
             for name in student_names:
+                # Replace full name (case-insensitive)
                 cleaned = re.sub(re.escape(name), "STUDENT", cleaned, flags=re.IGNORECASE)
+                # Replace first and last name separately if needed
                 for part in name.split():
                     cleaned = re.sub(rf"\b{re.escape(part)}\b", "STUDENT", cleaned, flags=re.IGNORECASE)
             return cleaned
@@ -360,10 +377,18 @@ with tab_comments:
             df_comments = pd.DataFrame(rows)
             st.dataframe(df_comments)
 
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                df_comments.to_excel(writer, index=False, sheet_name='Comments')
+            
+            excel_data = excel_buffer.getvalue()
+           
+
             st.download_button(
-                "Download Comments CSV",
-                df_comments.to_csv(index=False),
-                file_name=f"{course_name}_{assignment_name}_comments.csv",
-                mime="text/csv"
+                "Download Comments as Excel",
+                data=excel_data,
+                file_name=f"{course_name}_{assignment_name}_comments.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"  
             )
 
+            
