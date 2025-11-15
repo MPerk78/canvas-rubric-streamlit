@@ -3,3 +3,5 @@ pandas
 canvasapi
 matplotlib
 plotly
+requests
+openai
